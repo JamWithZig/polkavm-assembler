@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const misc = @import("misc.zig");
+const non_zero = @import("non_zero.zig");
 
 const FixupKind = misc.FixupKind;
 const InstBuf = misc.InstBuf;
@@ -9,10 +10,10 @@ const Instruction = misc.Instruction;
 const Label = misc.Label;
 
 const Fixup = struct {
-    target_label: Label(),
+    target_label: Label,
     instruction_offset: usize,
     instruction_length: u8,
-    kind: FixupKind(),
+    kind: FixupKind,
 };
 
 pub const AssemblerError = error{
@@ -48,76 +49,80 @@ pub const Assembler = struct {
         return Self.init(std.heap.page_allocator);
     }
 
-    pub fn current_address(self: Self) u64 {
+    pub fn currentAddress(self: Self) u64 {
         const items_len: u64 = @intCast(self.code.items.len);
         return self.origin + items_len;
     }
 
-    pub fn forward_declare_label(self: *Self) Label() {
+    pub fn forwardDeclareLabel(self: *Self) Label {
         const label: u32 = @intCast(self.labels.items.len);
-        self.labels.append(std.math.maxInt(isize)) catch unreachable;
-        return Label().from_raw(label);
+        try self.labels.append(std.math.maxInt(isize));
+        return Label.fromRaw(label);
     }
 
-    pub fn create_label(self: *Self) Label() {
+    pub fn createLabel(self: *Self) Label {
         const label: u32 = @intCast(self.labels.items.len);
+        const label_from_raw = Label.fromRaw(label);
 
-        std.log.debug("{:08x}: {}:", self.origin + self.code.items.len, Label().from_raw(label));
+        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        std.log.debug("{:08x}: {}:", origin_plus_len, label_from_raw);
 
         const items_len: isize = @intCast(self.code.items.len);
-        self.labels.append(items_len) catch unreachable;
-        return Label().from_raw(label);
+        try self.labels.append(items_len);
+        return label_from_raw;
     }
 
-    pub fn define_label(self: *Self, label: Label()) *Self {
-        std.log.debug("{:08x}: {}:", self.origin + self.code.items.len, label);
+    pub fn defineLabel(self: *Self, label: Label) *Self {
+        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        std.log.debug("{:08x}: {}:", origin_plus_len, label);
         std.debug.assert(self.labels.items[label.raw()] == std.math.maxInt(isize), "tried to redefine an already defined label");
 
         const items_len: isize = @intCast(self.code.items.len);
-        self.labels.items[label.raw()] = items_len;
+        const label_raw: usize = @intCast(label.raw());
+        self.labels.items[label_raw] = items_len;
         return self;
     }
 
-    pub fn push_with_label(self: *Self, label: Label(), instruction: anytype) *Self {
-        _ = self.define_label(label);
+    pub fn pushWithLabel(self: *Self, label: Label, comptime T: type, instruction: Instruction(T)) *Self {
+        _ = self.defineLabel(label);
         return self.push(instruction);
     }
 
-    pub inline fn get_label_origin_offset(self: *Self, label: Label()) ?isize {
-        const offset = self.labels.items[label.raw()];
+    pub inline fn getLabelOriginOffset(self: *Self, label: Label) ?isize {
+        const label_raw: usize = @intCast(label.raw());
+        const offset = self.labels.items[label_raw];
         if (offset == std.math.maxInt(isize)) return null;
         return offset;
     }
 
-    pub fn get_label_origin_offset_or_panic(self: *Self, label: Label()) AssemblerError!isize {
-        return self.get_label_origin_offset(label) orelse
-            AssemblerError.LabelNotDefined;
+    pub fn getLabelOriginOffsetOrPanic(self: *Self, label: Label) AssemblerError!isize {
+        return self.getLabelOriginOffset(label) orelse AssemblerError.LabelNotDefined;
     }
 
-    pub fn set_label_origin_offset(self: *Self, label: Label(), offset: isize) void {
+    pub fn setLabelOriginOffset(self: *Self, label: Label, offset: isize) void {
         self.labels.items[label.raw()] = offset;
     }
 
-    pub inline fn add_fixup(self: *Self, instruction_offset: usize, instruction_length: usize, target_label: Label(), kind: FixupKind()) void {
-        std.debug.assert(target_label.raw() < self.labels.items.len);
+    pub inline fn addFixup(self: *Self, instruction_offset: usize, instruction_length: usize, target_label: Label, kind: FixupKind) !void {
+        std.debug.assert(target_label.raw() < self.labels.items.len, "target label {} is greater than labels len {}", .{ target_label.raw(), self.labels.items.len });
         std.debug.assert(kind.offset() < instruction_length, "instruction is {} bytes long and yet its target fixup starts at {}", .{ instruction_length, kind.offset() });
-        std.debug.assert(kind.length() < instruction_length);
-        std.debug.assert(kind.offset() + kind.length() <= instruction_length);
+        std.debug.assert(kind.length() < instruction_length, "kind len {} is greater than instruction len {}", .{ kind.length(), instruction_length });
+        std.debug.assert(kind.offset() + kind.length() <= instruction_length, "kind offset {} + kind len {} is greater than instruction len {}", .{ kind.offset(), kind.length(), instruction_length });
 
         const instruction_length_u8: u8 = @intCast(instruction_length);
-        // TODO: change unreachable to error
-        self.fixups.append(Fixup{
+        try self.fixups.append(Fixup{
             .target_label = target_label,
             .instruction_offset = instruction_offset,
             .instruction_length = instruction_length_u8,
             .kind = kind,
-        }) catch unreachable;
+        });
     }
 
-    pub inline fn reserve(self: *Self, comptime T: NonZero) ReservedAssembler {
+    pub inline fn reserve(self: *Self, comptime T: non_zero.NonZeroUsize) ReservedAssembler {
         // Reserve space in code buffer
-        InstBuf.reserve(&self.code, @field(T, "value"));
-        self.guaranteed_capacity = @field(T, "value");
+        const t_val = T.get();
+        InstBuf.reserve(&self.code, t_val);
+        self.guaranteed_capacity = t_val;
 
         return ReservedAssembler{
             .assembler = self,
@@ -125,114 +130,123 @@ pub const Assembler = struct {
         };
     }
 
-    pub fn push(self: *Assembler, instruction: anytype) *Assembler {
+    pub inline fn push(self: *Assembler, comptime T: type, instruction: Instruction(T)) *Assembler {
         if (self.guaranteed_capacity == 0) {
-            // InstBuf.reserve_const(&self.code, 1);
+            InstBuf.reserveConst(1, &self.code);
             self.guaranteed_capacity = 1;
         }
 
-        return self.push_unchecked(instruction);
+        // SAFETY: We've reserved space for at least one instruction.
+        return self.pushUnchecked(instruction);
     }
 
-    pub fn push_unchecked(self: *Assembler, instruction: anytype) *Assembler {
-        // Trace logging omitted
-        std.debug.assert(self.guaranteed_capacity > 0);
+    // SAFETY: The buffer *must* have space for at least one instruction.
+    pub fn pushUnchecked(self: *Assembler, instruction: anytype) *Assembler {
+        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        std.log.debug("{:08x}: {}", origin_plus_len, instruction);
+        std.debug.assert(self.guaranteed_capacity > 0, "guaranteed capacity should not be 0");
 
         const instruction_offset = self.code.items.len;
 
-        // Encode instruction into code buffer
-        // instruction.bytes.encode_into_vec_unsafe(&self.code);
+        // SAFETY: The caller reserved space for at least one instruction.
+        instruction.bytes.encodeIntoVecUnsafe(&self.code);
         self.guaranteed_capacity -= 1;
 
         if (instruction.fixup) |fixup_tuple| {
-            self.add_fixup(
+            self.addFixup(
                 instruction_offset,
                 instruction.bytes.len(),
-                fixup_tuple[0], // label
-                fixup_tuple[1], // fixup
+                fixup_tuple.label,
+                fixup_tuple.kind,
             );
         }
 
         return self;
     }
 
-    pub fn push_raw(self: *Assembler, bytes: []const u8) *Assembler {
-        // Trace logging omitted
-        self.code.appendSlice(bytes) catch unreachable;
+    pub fn pushRaw(self: *Assembler, bytes: []const u8) !*Assembler {
+        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        std.log.debug("{:08x}: {}", origin_plus_len, bytes);
+        try self.code.appendSlice(bytes);
         return self;
     }
 
     pub fn finalize(self: *Assembler) AssembledCode {
-        var i: usize = 0;
-        while (i < self.fixups.items.len) : (i += 1) {
-            const fixup = self.fixups.items[i];
-
-            const origin = fixup.instruction_offset + @as(usize, fixup.instruction_length);
-            const target_absolute = self.labels.items[fixup.target_label.raw()];
+        for (self.fixups.items) |fixup| {
+            const instruction_length: usize = @intCast(fixup.instruction_length);
+            const origin = fixup.instruction_offset + instruction_length;
+            const target_label: usize = @intCast(fixup.target_label.raw());
+            const target_absolute = self.labels.items[target_label];
 
             if (target_absolute == std.math.maxInt(isize)) {
-                // Trace logging: Undefined label found
+                std.log.trace("Undefined label found: {}", fixup.target_label);
                 continue;
             }
 
-            const opcode = (fixup.kind.inner << 8) >> 8;
+            const opcode = @as(u32, (fixup.kind.inner << 8) >> 8);
             const fixup_offset = fixup.kind.offset();
             const fixup_length = fixup.kind.length();
 
             if (fixup_offset >= 1) {
-                self.code.items[fixup.instruction_offset] = @intCast(u8, opcode);
+                const opcode_u8: u8 = @intCast(opcode);
+                self.code.items[fixup.instruction_offset] = opcode_u8;
                 if (fixup_offset >= 2) {
-                    self.code.items[fixup.instruction_offset + 1] = @intCast(u8, opcode >> 8);
+                    const opcode8_u8: u8 = @intCast(opcode >> 8);
+                    self.code.items[fixup.instruction_offset + 1] = opcode8_u8;
                     if (fixup_offset >= 3) {
-                        self.code.items[fixup.instruction_offset + 2] = @intCast(u8, opcode >> 16);
+                        const opcode16_u8: u8 = @intCast(opcode >> 16);
+                        self.code.items[fixup.instruction_offset + 2] = opcode16_u8;
                     }
                 }
             }
 
-            const offset = target_absolute - @intCast(isize, origin);
-            const p = fixup.instruction_offset + @as(usize, fixup_offset);
+            const origin_isize: isize = @intCast(origin);
+            const offset = target_absolute - origin_isize;
+            const fixup_offset_usize: usize = @intCast(fixup_offset);
+            const p = fixup.instruction_offset + fixup_offset_usize;
 
             if (fixup_length == 1) {
                 if (offset > std.math.maxInt(i8) or offset < std.math.minInt(i8)) {
                     @panic("out of range jump");
                 }
-                self.code.items[p] = @bitCast(u8, @intCast(i8, offset));
+                self.code.items[p] = @as(u8, @intCast(offset));
             } else if (fixup_length == 4) {
                 if (offset > std.math.maxInt(i32) or offset < std.math.minInt(i32)) {
                     @panic("out of range jump");
                 }
 
-                const bytes = std.mem.toBytes(@intCast(i32, offset));
+                const offset_i32: i32 = @intCast(offset);
+                const bytes = std.mem.toBytes(offset_i32);
                 std.mem.copy(u8, self.code.items[p .. p + 4], &bytes);
             } else {
                 unreachable;
             }
         }
 
-        // Clear fixups
         self.fixups.clearRetainingCapacity();
 
         return AssembledCode{ .assembler = self };
     }
 
-    pub fn is_empty(self: *Assembler) bool {
+    pub fn isEmpty(self: *Assembler) bool {
         return self.code.items.len == 0;
     }
 
-    pub fn len(self: *Assembler) usize {
+    pub fn length(self: *Assembler) usize {
         return self.code.items.len;
     }
 
-    pub fn code_mut(self: *Assembler) []u8 {
-        return self.code.items;
-    }
+    // TODO: may not be required
+    // pub fn codeMut(self: *Assembler) []u8 {
+    //     return self.code.items;
+    // }
 
-    pub fn spare_capacity(self: *Assembler) usize {
+    pub fn spareCapacity(self: *Assembler) usize {
         return self.code.capacity - self.code.items.len;
     }
 
-    pub fn resize(self: *Assembler, size: usize, fill_with: u8) void {
-        self.code.resize(size) catch unreachable;
+    pub fn resize(self: *Assembler, size: usize, fill_with: u8) !void {
+        try self.code.resize(size);
         if (size > self.code.items.len) {
             const start = self.code.items.len;
             const end = size;
@@ -242,16 +256,16 @@ pub const Assembler = struct {
         }
     }
 
-    pub fn reserve_code(self: *Assembler, length: usize) void {
-        self.code.ensureTotalCapacity(self.code.items.len + length) catch unreachable;
+    pub fn reserveCode(self: *Assembler, len: usize) !void {
+        try self.code.ensureTotalCapacity(self.code.items.len + len);
     }
 
-    pub fn reserve_labels(self: *Assembler, length: usize) void {
-        self.labels.ensureTotalCapacity(self.labels.items.len + length) catch unreachable;
+    pub fn reserveLabels(self: *Assembler, len: usize) !void {
+        try self.labels.ensureTotalCapacity(self.labels.items.len + len);
     }
 
-    pub fn reserve_fixups(self: *Assembler, length: usize) void {
-        self.fixups.ensureTotalCapacity(self.fixups.items.len + length) catch unreachable;
+    pub fn reserveFixups(self: *Assembler, len: usize) !void {
+        try self.fixups.ensureTotalCapacity(self.fixups.items.len + len);
     }
 
     pub fn clear(self: *Assembler) void {
@@ -259,6 +273,7 @@ pub const Assembler = struct {
         self.code.clearRetainingCapacity();
         self.labels.clearRetainingCapacity();
         self.fixups.clearRetainingCapacity();
+        self.guaranteed_capacity = 0;
     }
 };
 
@@ -269,91 +284,83 @@ pub const AssembledCode = struct {
         return self.assembler.code.items;
     }
 
-    pub fn toOwned(self: *AssembledCode, allocator: Allocator) ![]u8 {
-        const result = try allocator.alloc(u8, self.assembler.code.items.len);
-        std.mem.copy(u8, result, self.assembler.code.items);
-        return result;
-    }
-
     pub inline fn deinit(self: *AssembledCode) void {
         self.assembler.clear();
     }
 };
 
-// Type-level counter for compile-time counting
-pub const NonZero = struct {
-    value: usize,
-    next: ?type,
-};
-
 pub const U0 = struct {};
-pub const U1 = NonZero{ .value = 1, .next = U0 };
-pub const U2 = NonZero{ .value = 2, .next = U1 };
-pub const U3 = NonZero{ .value = 3, .next = U2 };
-pub const U4 = NonZero{ .value = 4, .next = U3 };
-pub const U5 = NonZero{ .value = 5, .next = U4 };
-pub const U6 = NonZero{ .value = 6, .next = U5 };
+pub const U1 = non_zero.NonZeroUsize.new(1, U0);
+pub const U2 = non_zero.NonZeroUsize.new(2, U1);
+pub const U3 = non_zero.NonZeroUsize.new(3, U2);
+pub const U4 = non_zero.NonZeroUsize.new(4, U3);
+pub const U5 = non_zero.NonZeroUsize.new(5, U4);
+pub const U6 = non_zero.NonZeroUsize.new(6, U5);
 
-pub fn ReservedAssembler(comptime phantom_data: type) type {
+pub fn ReservedAssembler(comptime R: type) type {
     return struct {
+        const Self = @This();
+
         assembler: *Assembler,
-        phantom_data: phantom_data,
+        phantom_data: R,
 
         // if phantom_data is U0, this function does nothing
-        pub inline fn assert_reserved_exactly_as_needed(self: ReservedAssembler) void {
-            if (self.phantom_data == U0) {
+        pub inline fn assert_reserved_exactly_as_needed(self: Self) void {
+            if (@TypeOf(self.phantom_data) == U0) {
                 return;
             }
+            // NOTE: this is only implemented for U0
+            unreachable;
         }
 
-        pub inline fn push(self: ReservedAssembler, instruction: anytype) ReservedAssembler {
-            // Safety: `phantom_data: NonZero`, so we still have space in the buffer.
-            if (@TypeOf(self.phantom_data) == NonZero) {
+        pub inline fn push(self: Self, comptime T: type, instruction: Instruction(T)) Self {
+            // Safety: `phantom_data: NonZeroUsize`, so we still have space in the buffer.
+            if (@TypeOf(self.phantom_data) == non_zero.NonZeroUsize) {
                 self.assembler.push_unchecked(instruction);
 
-                return ReservedAssembler{
+                return Self{
                     .assembler = self.assembler,
-                    .phantom_data = @field(self.phantom_data, "next"),
+                    .phantom_data = R,
                 };
             }
             unreachable;
         }
 
-        pub inline fn push_if(self: ReservedAssembler, condition: bool, instruction: anytype) ReservedAssembler {
-            // SAFETY: `phantom_data: NonZero`, so we still have space in the buffer.
-            if (@TypeOf(self.phantom_data) == NonZero) {
+        pub inline fn push_if(self: Self, condition: bool, comptime T: type, instruction: Instruction(T)) Self {
+            // SAFETY: `phantom_data: NonZeroUsize`, so we still have space in the buffer.
+            if (@TypeOf(self.phantom_data) == non_zero.NonZeroUsize) {
                 if (condition) {
                     self.assembler.push_unchecked(instruction);
                 }
 
-                return ReservedAssembler{
+                return Self{
                     .assembler = self.assembler,
-                    .phantom_data = @field(self.phantom_data, "next"),
+                    .phantom_data = R,
                 };
             }
             unreachable;
         }
 
-        pub inline fn push_none(self: ReservedAssembler) ReservedAssembler {
-            // SAFETY: `phantom_data: NonZero`
-            if (@TypeOf(self.phantom_data) == NonZero) {
-                return ReservedAssembler{
+        pub inline fn push_none(self: Self) Self {
+            // SAFETY: `phantom_data: NonZeroUsize`
+            if (@TypeOf(self.phantom_data) == non_zero.NonZeroUsize) {
+                return Self{
                     .assembler = self.assembler,
-                    .phantom_data = @field(self.phantom_data, "next"),
+                    .phantom_data = R,
                 };
             }
             unreachable;
         }
 
-        pub inline fn get_label_origin_offset(self: ReservedAssembler, label: Label()) ?isize {
+        pub inline fn get_label_origin_offset(self: Self, label: Label) ?isize {
             return self.assembler.get_label_origin_offset(label);
         }
 
-        pub inline fn len(self: ReservedAssembler) usize {
-            return self.assembler.len();
+        pub inline fn length(self: Self) usize {
+            return self.assembler.length();
         }
 
-        pub inline fn is_empty(self: ReservedAssembler) bool {
+        pub inline fn is_empty(self: Self) bool {
             return self.assembler.is_empty();
         }
     };

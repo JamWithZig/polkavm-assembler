@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const NonZeroU32 = @import("non_zero.zig").NonZeroU32;
 
@@ -39,28 +40,28 @@ pub fn Instruction(comptime T: type) type {
 pub const FixupKind = struct {
     const Self = @This();
 
-    kind: u32,
+    inner: u32,
 
     pub inline fn offset(self: *Self) u32 {
-        return (self.kind >> 24) & 0b11;
+        return (self.inner >> 24) & 0b11;
     }
 
     pub inline fn length(self: *Self) u32 {
-        return self.kind >> 28;
+        return self.inner >> 28;
     }
 
     pub inline fn new1(opcode: u32, len: u32) Self {
-        return Self{ .kind = (1 << 24) | (len << 28) | opcode };
+        return Self{ .inner = (1 << 24) | (len << 28) | opcode };
     }
 
     pub inline fn new2(opcode: [2]u32, len: u32) Self {
         const opcode_u32 = opcode[0] | (opcode[1] << 8);
-        return Self{ .kind = (2 << 24) | (len << 28) | opcode_u32 };
+        return Self{ .inner = (2 << 24) | (len << 28) | opcode_u32 };
     }
 
     pub inline fn new3(opcode: [3]u32, len: u32) Self {
         const opcode_u32 = opcode[0] | (opcode[1] << 8) | (opcode[2] << 16);
-        return Self{ .kind = (3 << 24) | (len << 28) | opcode_u32 };
+        return Self{ .inner = (3 << 24) | (len << 28) | opcode_u32 };
     }
 };
 
@@ -144,7 +145,7 @@ pub const InstBuf = struct {
         return &out;
     }
 
-    pub fn toVec(self: *Self, allocator: std.mem.Allocator) !ArrayList(u8) {
+    pub fn toVec(self: *Self, allocator: Allocator) !ArrayList(u8) {
         var vec = try ArrayList(u8).initCapacity(allocator, MAXIMUM_INSTRUCTION_SIZE);
 
         // SAFETY: We've reserved space for at least one instruction.
@@ -155,12 +156,12 @@ pub const InstBuf = struct {
 };
 
 // Test InstBuf operations
-fn testInstBuf(allocator: std.mem.Allocator, input: []const u8, expected: []const u8) !void {
+fn testInstBuf(allocator: Allocator, input: []const u8, expected: []const u8) !void {
     var actual = try InstBuf.fromArray(input).toVec(allocator);
     defer actual.deinit();
     try std.testing.expectEqualSlices(u8, expected, actual.items);
 }
-fn testAfterAppendPackedBytes(allocator: std.mem.Allocator, buf: *InstBuf, expected: []const u8) !void {
+fn testAfterAppendPackedBytes(allocator: Allocator, buf: *InstBuf, expected: []const u8) !void {
     const arr = try buf.toVec(allocator);
     defer arr.deinit();
     try std.testing.expectEqualSlices(u8, expected, arr.items);
