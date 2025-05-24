@@ -48,18 +48,18 @@ pub const FixupKind = struct {
         return self.kind >> 28;
     }
 
-    pub inline fn new1(opcode: u32, length: u32) Self {
-        return Self{ .kind = (1 << 24) | (length << 28) | opcode };
+    pub inline fn new1(opcode: u32, len: u32) Self {
+        return Self{ .kind = (1 << 24) | (len << 28) | opcode };
     }
 
-    pub inline fn new2(opcode: [u32; 2], length: u32) Self {
-        let opcode = opcode[0] | (opcode[1] << 8);
-        return Self{ .kind = (2 << 24) | (length << 28) | opcode };
+    pub inline fn new2(opcode: [2]u32, len: u32) Self {
+        const opcode_u32 = opcode[0] | (opcode[1] << 8);
+        return Self{ .kind = (2 << 24) | (len << 28) | opcode_u32 };
     }
 
-    pub inline fn new3(opcode: [u32; 3], length: u32) Self {
-        let opcode = opcode[0] | (opcode[1] << 8) | (opcode[2] << 16);
-        return Self{ .kind = (3 << 24) | (length << 28) | opcode };
+    pub inline fn new3(opcode: [3]u32, len: u32) Self {
+        const opcode_u32 = opcode[0] | (opcode[1] << 8) | (opcode[2] << 16);
+        return Self{ .kind = (3 << 24) | (len << 28) | opcode_u32 };
     }
 };
 
@@ -75,22 +75,28 @@ pub const InstBuf = struct {
         return Self{ .out = 0, .len = 0 };
     }
 
-    pub inline fn len(self: *Self) usize {
+    pub inline fn length(self: *Self) usize {
         return @as(usize, self.len >> 3);
     }
 
-    pub inline fn append(self: *Self, byte: u8) {
+    pub inline fn append(self: *Self, byte: u8) void {
         self.out |= @as(u128, byte) <<| @as(u128, self.len);
         self.len += 8;
     }
 
-    pub inline fn appendPackedBytes(self: *Self, value: u32, length: u32) {
+    pub inline fn appendPackedBytes(self: *Self, value: u32, len: u32) void {
         self.out |= @as(u128, value) <<| @as(u128, self.len);
-        self.len += length;
+        self.len += len;
     }
 
-    inline fn encodeIntoRaw(self: *Self, output: u8) void {
-        // Not required
+    inline fn encodeIntoRaw(self: *Self, output: *u8) void {
+        const lower_bytes = std.mem.nativeToLittle(u64, @as(u64, self.out));
+        const higher_bytes = std.mem.nativeToLittle(u64, @as(u64, self.out >> 64));
+        // capacity increment not required, as we are assuming capacity is enough
+        const lower_ptr: *u64 = @ptrCast(&lower_bytes);
+        const higher_ptr: *u64 = @ptrCast(&higher_bytes);
+        @memcpy(output, lower_ptr);
+        @memcpy(output + 8, higher_ptr);
     }
 
     pub inline fn encodeIntoVecUnsafe(self: Self, output: *ArrayList(u8)) void {
@@ -98,12 +104,15 @@ pub const InstBuf = struct {
         const available_space = output.capacity - output.items.len;
         std.debug.assert(available_space >= MAXIMUM_INSTRUCTION_SIZE);
 
-        // TODO:
-        output.appendAssumeCapacity(std.mem.nativeToLittle(u64, @as(u64, self.out)));
-        output.appendAssumeCapacity(std.mem.nativeToLittle(u64, @as(u64, self.out >> 64)));
+        // TODO: testing
+        // output.appendAssumeCapacity(std.mem.nativeToLittle(u64, @as(u64, self.out)));
+        // output.appendAssumeCapacity(std.mem.nativeToLittle(u64, @as(u64, self.out >> 64)));
+        self.encodeIntoRaw(output.items[output.items.len..].ptr);
+        const new_length = output.items.len + (self.len >> 3);
+        output.items.len = new_length;
     }
 
-    inline fn reserveImpl(output: *ArrayList(u8), length: usize) void {
-        output.ensureTotalCapacity(output.items.len + length);
+    inline fn reserveImpl(output: *ArrayList(u8), len: usize) void {
+        output.ensureTotalCapacity(output.items.len + len);
     }
 };

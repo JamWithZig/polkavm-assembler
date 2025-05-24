@@ -1,4 +1,3 @@
-/// Do not export this file
 const std = @import("std");
 
 fn NonZero(comptime T: type) type {
@@ -7,7 +6,11 @@ fn NonZero(comptime T: type) type {
     };
 }
 
-const NonZeroU32 = struct {
+pub const NonZeroError = error{
+    ZeroNotAllowed,
+};
+
+pub const NonZeroU32 = struct {
     const Self = @This();
 
     value: NonZero(u32),
@@ -15,15 +18,11 @@ const NonZeroU32 = struct {
     /// Constructor: returns error if value is zero
     pub fn new(v: u32) NonZeroError!Self {
         if (v == 0) return error.ZeroNotAllowed;
-        return Self{ .value = v };
+        return Self{ .value = NonZero(u32){ .value = v } };
     }
 
     /// Accessor for the underlying value
     pub fn get(self: Self) u32 {
-        return self.value;
+        return self.value.value;
     }
-};
-
-const NonZeroError = error{
-    ZeroNotAllowed,
 };
