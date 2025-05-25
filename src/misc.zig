@@ -157,7 +157,7 @@ pub const InstBuf = struct {
 
 // Test InstBuf operations
 fn testInstBuf(allocator: Allocator, input: []const u8, expected: []const u8) !void {
-    var actual = try InstBuf.fromArray(input).toVec(allocator);
+    const actual = try InstBuf.fromArray(input).toVec(allocator);
     defer actual.deinit();
     try std.testing.expectEqualSlices(u8, expected, actual.items);
 }
@@ -168,9 +168,7 @@ fn testAfterAppendPackedBytes(allocator: Allocator, buf: *InstBuf, expected: []c
 }
 
 test "InstBuf operations" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.testing.allocator;
 
     // Test fromArray and toVec with different array sizes
     try testInstBuf(allocator, &[_]u8{0x01}, &[_]u8{0x01});
