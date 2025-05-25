@@ -50,21 +50,21 @@ pub const Assembler = struct {
     }
 
     pub fn currentAddress(self: Self) u64 {
-        const items_len: u64 = @intCast(self.code.items.len);
+        const items_len: u64 = @truncate(self.code.items.len);
         return self.origin + items_len;
     }
 
     pub fn forwardDeclareLabel(self: *Self) Label {
-        const label: u32 = @intCast(self.labels.items.len);
+        const label: u32 = @truncate(self.labels.items.len);
         try self.labels.append(std.math.maxInt(isize));
         return Label.fromRaw(label);
     }
 
     pub fn createLabel(self: *Self) Label {
-        const label: u32 = @intCast(self.labels.items.len);
+        const label: u32 = @truncate(self.labels.items.len);
         const label_from_raw = Label.fromRaw(label);
 
-        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        const origin_plus_len: u64 = @truncate(self.origin + self.code.items.len);
         std.log.debug("{:08x}: {}:", origin_plus_len, label_from_raw);
 
         const items_len: isize = @intCast(self.code.items.len);
@@ -73,12 +73,12 @@ pub const Assembler = struct {
     }
 
     pub fn defineLabel(self: *Self, label: Label) *Self {
-        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        const origin_plus_len: u64 = @truncate(self.origin + self.code.items.len);
         std.log.debug("{:08x}: {}:", origin_plus_len, label);
         std.debug.assert(self.labels.items[label.raw()] == std.math.maxInt(isize), "tried to redefine an already defined label");
 
         const items_len: isize = @intCast(self.code.items.len);
-        const label_raw: usize = @intCast(label.raw());
+        const label_raw: usize = @truncate(label.raw());
         self.labels.items[label_raw] = items_len;
         return self;
     }
@@ -89,7 +89,7 @@ pub const Assembler = struct {
     }
 
     pub inline fn getLabelOriginOffset(self: *Self, label: Label) ?isize {
-        const label_raw: usize = @intCast(label.raw());
+        const label_raw: usize = @truncate(label.raw());
         const offset = self.labels.items[label_raw];
         if (offset == std.math.maxInt(isize)) return null;
         return offset;
@@ -109,7 +109,7 @@ pub const Assembler = struct {
         std.debug.assert(kind.length() < instruction_length, "kind len {} is greater than instruction len {}", .{ kind.length(), instruction_length });
         std.debug.assert(kind.offset() + kind.length() <= instruction_length, "kind offset {} + kind len {} is greater than instruction len {}", .{ kind.offset(), kind.length(), instruction_length });
 
-        const instruction_length_u8: u8 = @intCast(instruction_length);
+        const instruction_length_u8: u8 = @truncate(instruction_length);
         try self.fixups.append(Fixup{
             .target_label = target_label,
             .instruction_offset = instruction_offset,
@@ -142,7 +142,7 @@ pub const Assembler = struct {
 
     // SAFETY: The buffer *must* have space for at least one instruction.
     pub fn pushUnchecked(self: *Assembler, instruction: anytype) *Assembler {
-        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        const origin_plus_len: u64 = @truncate(self.origin + self.code.items.len);
         std.log.debug("{:08x}: {}", origin_plus_len, instruction);
         std.debug.assert(self.guaranteed_capacity > 0, "guaranteed capacity should not be 0");
 
@@ -165,7 +165,7 @@ pub const Assembler = struct {
     }
 
     pub fn pushRaw(self: *Assembler, bytes: []const u8) !*Assembler {
-        const origin_plus_len: u64 = @intCast(self.origin + self.code.items.len);
+        const origin_plus_len: u64 = @truncate(self.origin + self.code.items.len);
         std.log.debug("{:08x}: {}", origin_plus_len, bytes);
         try self.code.appendSlice(bytes);
         return self;
@@ -173,10 +173,8 @@ pub const Assembler = struct {
 
     pub fn finalize(self: *Assembler) AssembledCode {
         for (self.fixups.items) |fixup| {
-            const instruction_length: usize = @intCast(fixup.instruction_length);
-            const origin = fixup.instruction_offset + instruction_length;
-            const target_label: usize = @intCast(fixup.target_label.raw());
-            const target_absolute = self.labels.items[target_label];
+            const origin = fixup.instruction_offset + @as(usize, fixup.instruction_length);
+            const target_absolute = self.labels.items[@as(usize, fixup.target_label.raw())];
 
             if (target_absolute == std.math.maxInt(isize)) {
                 std.log.trace("Undefined label found: {}", fixup.target_label);
@@ -188,13 +186,13 @@ pub const Assembler = struct {
             const fixup_length = fixup.kind.length();
 
             if (fixup_offset >= 1) {
-                const opcode_u8: u8 = @intCast(opcode);
+                const opcode_u8: u8 = @truncate(opcode);
                 self.code.items[fixup.instruction_offset] = opcode_u8;
                 if (fixup_offset >= 2) {
-                    const opcode8_u8: u8 = @intCast(opcode >> 8);
+                    const opcode8_u8: u8 = @truncate(opcode >> 8);
                     self.code.items[fixup.instruction_offset + 1] = opcode8_u8;
                     if (fixup_offset >= 3) {
-                        const opcode16_u8: u8 = @intCast(opcode >> 16);
+                        const opcode16_u8: u8 = @truncate(opcode >> 16);
                         self.code.items[fixup.instruction_offset + 2] = opcode16_u8;
                     }
                 }
@@ -202,14 +200,15 @@ pub const Assembler = struct {
 
             const origin_isize: isize = @intCast(origin);
             const offset = target_absolute - origin_isize;
-            const fixup_offset_usize: usize = @intCast(fixup_offset);
+            const fixup_offset_usize: usize = @truncate(fixup_offset);
             const p = fixup.instruction_offset + fixup_offset_usize;
 
             if (fixup_length == 1) {
                 if (offset > std.math.maxInt(i8) or offset < std.math.minInt(i8)) {
                     @panic("out of range jump");
                 }
-                self.code.items[p] = @as(u8, @intCast(offset));
+                const offset_u8: u8 = @truncate(offset);
+                self.code.items[p] = offset_u8;
             } else if (fixup_length == 4) {
                 if (offset > std.math.maxInt(i32) or offset < std.math.minInt(i32)) {
                     @panic("out of range jump");
@@ -217,7 +216,7 @@ pub const Assembler = struct {
 
                 const offset_i32: i32 = @intCast(offset);
                 const bytes = std.mem.toBytes(offset_i32);
-                std.mem.copy(u8, self.code.items[p .. p + 4], &bytes);
+                @memcpy(self.code.items[p .. p + 4], bytes);
             } else {
                 unreachable;
             }
