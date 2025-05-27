@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const MultiArrayList = std.MultiArrayList;
 const misc = @import("misc.zig");
 const non_zero = @import("non_zero.zig");
 
@@ -24,7 +25,7 @@ pub const Assembler = struct {
     origin: u64,
     code: ArrayList(u8),
     labels: ArrayList(isize),
-    fixups: ArrayList(Fixup),
+    fixups: MultiArrayList(Fixup),
     guaranteed_capacity: usize,
 
     const Self = @This();
@@ -34,7 +35,7 @@ pub const Assembler = struct {
             .origin = 0,
             .code = ArrayList(u8).init(allocator),
             .labels = ArrayList(isize).init(allocator),
-            .fixups = ArrayList(Fixup).init(allocator),
+            .fixups = MultiArrayList(Fixup).init(allocator),
             .guaranteed_capacity = 0,
         };
     }

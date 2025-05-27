@@ -650,7 +650,7 @@ pub const Condition = enum(u8) {
 
     const Self = @This();
 
-    const fn suffix(self: Self) []const u8 {
+    fn suffix(self: Self) []const u8 {
         return switch (self) {
             .Overflow => "o",
             .NotOverflow => "no",
