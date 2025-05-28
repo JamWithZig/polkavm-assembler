@@ -1,3 +1,4 @@
+const std = @import("std");
 const misc = @import("misc.zig");
 const FixupKind = misc.FixupKind;
 const InstBuf = misc.InstBuf;
@@ -401,7 +402,7 @@ pub const Inst = struct {
         return self;
     }
 
-    inline fn rex(self: *Self) *Self {
+    inline fn setRex(self: *Self) *Self {
         self.rex |= REX;
         return self;
     }
@@ -443,7 +444,7 @@ pub const Inst = struct {
     inline fn regmem(self: *Self, operand: RegMem) *Self {
         return switch (operand) {
             .reg => |reg| self.modrmRmDirect(reg),
-            .mem => |mem| self.mem(mem),
+            .mem => |mem_op| self.mem(mem_op),
         };
     }
 
@@ -472,11 +473,13 @@ pub const Inst = struct {
                 if (op.offset <= @as(i32, std.math.maxInt(i8)) and op.offset >= @as(i32, std.math.minInt(i8))) {
                     self.modrm |= 0b01000000 & set_displacement_mask_u8;
                     const offset_u8: u8 = @truncate(op.offset);
-                    self.displacement = @bitCast(u32, offset_u8) & set_displacement_mask;
+                    const offset_u32: u32 = @bitCast(offset_u8);
+                    self.displacement = offset_u32 & set_displacement_mask;
                     self.displacement_length = 8 & set_displacement_mask;
                 } else {
                     self.modrm |= 0b10000000 & set_displacement_mask_u8;
-                    self.displacement = @bitCast(u32, op.offset) & set_displacement_mask;
+                    const offset_u32: u32 = @bitCast(op.offset);
+                    self.displacement = offset_u32 & set_displacement_mask;
                     self.displacement_length = 32 & set_displacement_mask;
                 }
 
@@ -505,11 +508,13 @@ pub const Inst = struct {
                 if (op.offset <= @as(i32, std.math.maxInt(i8)) and op.offset >= @as(i32, std.math.minInt(i8))) {
                     self.modrm |= 0b01000000 & set_displacement_mask_u8;
                     const offset_u8: u8 = @truncate(op.offset);
-                    self.displacement = @bitCast(u32, offset_u8) & set_displacement_mask;
+                    const offset_u32: u32 = @bitCast(offset_u8);
+                    self.displacement = offset_u32 & set_displacement_mask;
                     self.displacement_length = 8 & set_displacement_mask;
                 } else {
                     self.modrm |= 0b10000000 & set_displacement_mask_u8;
-                    self.displacement = @bitCast(u32, op.offset) & set_displacement_mask;
+                    const offset_u32: u32 = @bitCast(op.offset);
+                    self.displacement = offset_u32 & set_displacement_mask;
                     self.displacement_length = 32 & set_displacement_mask;
                 }
 
@@ -525,8 +530,8 @@ pub const Inst = struct {
                 self.sib |= op.index.intoReg().modrmRegBits();
                 self.sib |= 0b00000101;
                 const scale_u8: u8 = @truncate(op.scale);
-                self.sib |= @bitCast(u8, scale_u8 << 6);
-                self.displacement = @bitCast(u32, op.offset);
+                self.sib |= @bitCast(scale_u8 << 6);
+                self.displacement = @bitCast(op.offset);
                 self.displacement_length = 32;
                 self.override_segment = op.segment;
                 return self.override_addr_size_if(op.size == RegSize.R32);
@@ -534,14 +539,14 @@ pub const Inst = struct {
             .offset => |op| {
                 self.modrm |= 0b00000100;
                 self.sib |= 0b00100101;
-                self.displacement = @bitCast(u32, op.offset);
+                self.displacement = @bitCast(op.offset);
                 self.displacement_length = 32;
                 self.override_segment = op.segment;
                 return self.override_addr_size_if(op.size == RegSize.R32 and op.offset < 0);
             },
             .rip_relative => |op| {
                 self.modrm |= 0b00000101;
-                self.displacement = @bitCast(u32, op.offset);
+                self.displacement = @bitCast(op.offset);
                 self.override_segment = op.segment;
                 return self;
             },
@@ -633,20 +638,20 @@ pub const Inst = struct {
 pub const Condition = enum(u8) {
     Overflow = 0,
     NotOverflow = 1,
-    Below = 2,        // For unsigned values.
+    Below = 2, // For unsigned values.
     AboveOrEqual = 3, // For unsigned values.
     Equal = 4,
     NotEqual = 5,
     BelowOrEqual = 6, // For unsigned values.
-    Above = 7,        // For unsigned values.
+    Above = 7, // For unsigned values.
     Sign = 8,
     NotSign = 9,
     Parity = 10,
     NotParity = 11,
-    Less = 12,           // For signed values.
+    Less = 12, // For signed values.
     GreaterOrEqual = 13, // For signed values.
-    LessOrEqual = 14,    // For signed values.
-    Greater = 15,        // For signed values.
+    LessOrEqual = 14, // For signed values.
+    Greater = 15, // For signed values.
 
     const Self = @This();
 
@@ -670,7 +675,7 @@ pub const Condition = enum(u8) {
             .Greater => "g",
         };
     }
-}
+};
 
 pub const RegSize = enum {
     R32,
@@ -703,7 +708,7 @@ pub const Size = enum {
             .U16 => "word",
             .U32 => "dword",
             .U64 => "qword",
-        }
+        };
     }
 
     fn from(reg_size: RegSize) Self {
@@ -712,7 +717,7 @@ pub const Size = enum {
             RegSize.R64 => .U64,
         };
     }
-}
+};
 
 pub const ImmKind = union(enum) {
     I8: u8,
@@ -732,3 +737,5 @@ pub const ImmKind = union(enum) {
         };
     }
 };
+
+// tests
