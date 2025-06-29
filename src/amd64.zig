@@ -1,5 +1,6 @@
 const std = @import("std");
 const misc = @import("misc.zig");
+const Fixup = misc.Fixup;
 const FixupKind = misc.FixupKind;
 const InstBuf = misc.InstBuf;
 const Instruction = misc.Instruction;
@@ -41,8 +42,8 @@ pub const Reg = enum(u8) {
     pub fn isRegPreserved(self: Self) bool {
         // See page 23 from: https://raw.githubusercontent.com/wiki/hjl-tools/x86-psABI/x86-64-psABI-1.0.pdf
         return switch (self) {
-            .rbx, .rsp, .rbp, .r12, .r13, .r14, .r15 => true,
-            .rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11 => false,
+            inline .rbx, .rsp, .rbp, .r12, .r13, .r14, .r15 => true,
+            inline .rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11 => false,
         };
     }
 
@@ -76,17 +77,17 @@ pub const Reg = enum(u8) {
 
     pub fn nameFrom(self: Self, size: RegSize) []const u8 {
         return switch (size) {
-            RegSize.R64 => self.name(),
-            RegSize.R32 => self.name32(),
+            inline RegSize.R64 => self.name(),
+            inline RegSize.R32 => self.name32(),
         };
     }
 
     pub fn nameFromSize(self: Self, kind: Size) []const u8 {
         return switch (kind) {
-            Size.U64 => self.name(),
-            Size.U32 => self.name32(),
-            Size.U16 => self.name16(),
-            Size.U8 => self.name8(),
+            inline Size.U64 => self.name(),
+            inline Size.U32 => self.name32(),
+            inline Size.U16 => self.name16(),
+            inline Size.U8 => self.name8(),
         };
     }
 
@@ -104,6 +105,14 @@ pub const Reg = enum(u8) {
 
     pub inline fn name8(self: Self) []const u8 {
         return reg_names8[@intFromEnum(self)];
+    }
+
+    pub fn fmt(self: Self) []const u8 {
+        return self.name();
+    }
+
+    pub inline fn from(regIdx: RegIndex) Self {
+        return regIdx.intoReg();
     }
 };
 
@@ -126,18 +135,18 @@ const regs = [_][4][]const u8{
     .{ "r15", "r15d", "r15w", "r15b" },
 };
 
-fn RegNames(comptime index: usize) [][]const u8 {
+fn regNames(comptime index: usize) [][]const u8 {
     var names = [regs.len][]const u8{undefined};
-    inline for (regs, 0..) |reg, i| {
+    for (regs, 0..) |reg, i| {
         names[i] = reg[index];
     }
     return names;
 }
 
-const reg_names64 = RegNames(0);
-const reg_names32 = RegNames(1);
-const reg_names16 = RegNames(2);
-const reg_names8 = RegNames(3);
+const reg_names64 = regNames(0);
+const reg_names32 = regNames(1);
+const reg_names16 = regNames(2);
+const reg_names8 = regNames(3);
 
 pub const RegIndex = enum(u8) {
     rax = 0,
@@ -159,27 +168,23 @@ pub const RegIndex = enum(u8) {
 
     const Self = @This();
 
-    pub inline fn from(self: Self) Reg {
-        return self.intoReg();
-    }
-
     pub inline fn intoReg(self: Self) Reg {
         return switch (self) {
-            .rax => Reg.rax,
-            .rcx => Reg.rcx,
-            .rdx => Reg.rdx,
-            .rbx => Reg.rbx,
-            .rbp => Reg.rbp,
-            .rsi => Reg.rsi,
-            .rdi => Reg.rdi,
-            .r8 => Reg.r8,
-            .r9 => Reg.r9,
-            .r10 => Reg.r10,
-            .r11 => Reg.r11,
-            .r12 => Reg.r12,
-            .r13 => Reg.r13,
-            .r14 => Reg.r14,
-            .r15 => Reg.r15,
+            inline .rax => Reg.rax,
+            inline .rcx => Reg.rcx,
+            inline .rdx => Reg.rdx,
+            inline .rbx => Reg.rbx,
+            inline .rbp => Reg.rbp,
+            inline .rsi => Reg.rsi,
+            inline .rdi => Reg.rdi,
+            inline .r8 => Reg.r8,
+            inline .r9 => Reg.r9,
+            inline .r10 => Reg.r10,
+            inline .r11 => Reg.r11,
+            inline .r12 => Reg.r12,
+            inline .r13 => Reg.r13,
+            inline .r14 => Reg.r14,
+            inline .r15 => Reg.r15,
         };
     }
 
@@ -201,15 +206,23 @@ pub const RegIndex = enum(u8) {
 
     pub inline fn nameFrom(self: Self, size: RegSize) []const u8 {
         return switch (size) {
-            RegSize.R64 => self.name(),
-            RegSize.R32 => self.name32(),
+            inline RegSize.R64 => self.name(),
+            inline RegSize.R32 => self.name32(),
         };
+    }
+
+    pub fn fmt(self: Self) []const u8 {
+        return self.intoReg().fmt();
     }
 };
 
 pub const SegReg = enum {
     fs,
     gs,
+
+    pub fn fmt(self: Self) []const u8 {
+        return @tagName(self);
+    }
 };
 
 pub const Scale = enum(u2) {
@@ -284,6 +297,58 @@ pub const MemOp = union(enum) {
                 }
             },
             else => self,
+        };
+    }
+
+    // TODO: fix it
+    fn fmt(self: Self) []const u8 {
+        const (segment, base, index, offset_reg_size, offset) = switch (self.simplify()) {
+            .base_offset => |op| .{
+                op.segment,
+                .{ op.size, op.base },
+                null,
+                op.size,
+                op.offset,
+            },
+            .base_index_scale_offset => |op| .{
+                op.segment,
+                .{ op.reg_size, op.base },
+                .{ op.reg_size, op.index, op.scale },
+                op.size,
+                op.offset,
+            },
+            .index_scale_offset => |op| .{
+                op.segment,
+                null,
+                .{ op.reg_size, op.index, op.scale },
+                op.size,
+                op.offset,
+            },
+            .offset => |op| .{
+                op.segment,
+                null,
+                null,
+                op.size,
+                op.offset,
+            },
+            .rip_relative => |op| {
+                var str = std.ArrayList(u8).init(std.heap.page_allocator);
+                defer str.deinit();
+
+                if(op.segment) |segment| {
+                    str.appendSlice(segment.fmt()) catch unreachable;
+                    str.append(':') catch unreachable;
+                }
+
+                str.append("rip") catch unreachable;
+                if(op.offset > 0) {
+                    str.appendPrint("+0x{x}", .{op.offset}) catch unreachable;
+                } else if(op.offset < 0) {
+                    str.appendPrint("-0x{x}", .{-@as(i64, op.offset)}) catch unreachable;
+                }
+                str.append("]") catch unreachable;
+                return str.toOwnedSlice();
+            },
         };
     }
 };
@@ -633,7 +698,86 @@ pub const Inst = struct {
     }
 };
 
-// TODO: macro impl_inst
+// macro impl_inst
+/// Define an instruction type with encoding, fixup, and formatting capabilities
+pub fn InstructionType(comptime name: []const u8, comptime Args: type, comptime encodeFn: fn (args: Args) InstBuf, comptime fixupFn: fn (args: Args) ?Fixup, comptime formatFn: fn (args: Args, writer: anytype) anyerror!void) type {
+    return struct {
+        args: Args,
+
+        const Self = @This();
+
+        pub fn init(args: Args) Self {
+            return .{ .args = args };
+        }
+
+        pub inline fn encode(self: Self) InstBuf {
+            return encodeFn(self.args);
+        }
+
+        pub inline fn fixup(self: Self) ?Fixup {
+            return fixupFn(self.args);
+        }
+
+        pub fn format(
+            self: Self,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+            return formatFn(self.args, writer);
+        }
+    };
+}
+
+/// Helper to create a collection of instruction types
+pub fn defineInstructions(comptime defs: anytype) type {
+    comptime {
+        // Create a struct to hold all instruction types
+        var fields: [defs.len]std.builtin.Type.StructField = undefined;
+
+        inline for (defs, 0..) |def, i| {
+            const Args = def.args;
+            const encode_fn = def.encode;
+            const fixup_fn = def.fixup;
+            const format_fn = def.format;
+
+            fields[i] = .{
+                .name = def.name,
+                .type = InstructionType(def.name, Args, encode_fn, fixup_fn, format_fn),
+                .default_value = null,
+                .is_comptime = false,
+                .alignment = @alignOf(u8),
+            };
+        }
+
+        return @Type(.{
+            .Struct = .{
+                .layout = .Auto,
+                .fields = &fields,
+                .decls = &[_]std.builtin.Type.Declaration{},
+                .is_tuple = false,
+            },
+        });
+    }
+}
+
+fn generate_test_values0() void {}
+
+fn generate_test_values1() void {}
+
+fn generate_test_values2() void {}
+
+fn generate_test_values3() void {}
+
+fn generate_test_values4() void {}
+
+fn generate_test_values5() void {}
+
+fn generate_test_values6() void {}
+
+test "Test amd64" {}
 
 pub const Condition = enum(u8) {
     Overflow = 0,
